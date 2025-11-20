@@ -3,8 +3,8 @@
 
 // WiFi Configuration
 // Change these to match your network
-#define WIFI_SSID      "alex"
-#define WIFI_PASSWORD  "V3rT0l0T"
+#define WIFI_SSID      "zainar_ssid"
+#define WIFI_PASSWORD  "zainar_pswd"
 
 // Maximum retry attempts
 #define WIFI_MAX_RETRY  5
