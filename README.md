@@ -1,96 +1,162 @@
+# ESP32-C3 WiFi USB Adapter
 
-# Host Setup for ESP32 WiFi Adapter
+This project turns a Seeed Studio XIAO ESP32-C3 module into a USB WiFi adapter that appears as a network interface (like eth0 or wlan0) on your Linux laptop.
 
-This directory contains scripts to set up the ESP32-C3 as a network interface on your Linux host.
+## Features
 
-## Scripts
+- USB CDC-ECM (Ethernet Control Model) interface - appears as a network device
+- WiFi Station mode with automatic 4-way handshake (WPA/WPA2/WPA3)
+- Transparent packet bridging between USB and WiFi
+- DHCP client support for automatic IP configuration
+- Configurable via menuconfig or code
 
-- `setup_tap.py` - Python script to create and configure TAP interface (recommended)
-- `setup_tap.sh` - Bash script alternative (legacy)
-- `bridge_usb.py` - USB to TAP bridge (must stay running)
-- `setup_routing.py` - Configure routing table to route traffic through ESP32
+## Hardware
 
-## Quick Start
+- **Board**: Seeed Studio XIAO ESP32-C3
+- **USB**: Native USB support (no external USB-to-serial chip needed)
+- **WiFi**: 2.4 GHz 802.11 b/g/n
 
-1. Flash the firmware to your ESP32-C3 (see main README)
+## Building
 
-2. Set up TAP interface:
+### Prerequisites
+
+1. Install ESP-IDF v5.0 or later:
 ```bash
-cd host_setup
-sudo python3 setup_tap.py  # Auto-detects ESP32 USB device
-# Or use bash script: sudo ./setup_tap.sh
+mkdir -p ~/esp
+cd ~/esp
+git clone --recursive https://github.com/espressif/esp-idf.git
+cd esp-idf
+./install.sh esp32c3
+. ./export.sh
 ```
 
-3. Start the USB bridge:
+2. Connect your XIAO ESP32-C3 via USB
+
+### Build and Flash
+
 ```bash
-sudo python3 bridge_usb.py  # Auto-detects ESP32 USB device
+cd /home/alex/Project/ESP32/Zainar_zps/esp32_modem
+idf.py set-target esp32c3
+idf.py menuconfig  # Configure WiFi credentials (optional)
+idf.py build
+idf.py flash monitor
 ```
 
-4. Configure network interface:
-```bash
-sudo ip addr add 192.168.7.2/24 dev esp0
-sudo ip link set esp0 up
-```
-5. Configure routing (optional):
-```bash
-# Route all traffic through ESP32
-sudo python3 setup_routing.py --default
+## Configuration
 
-# Or route specific networks only
-sudo python3 setup_routing.py --route 192.168.1.0/24
+### WiFi Credentials
+
+Edit `main/wifi_config.h` or configure via menuconfig:
+- Component config → Example Configuration → WiFi SSID
+- Component config → Example Configuration → WiFi Password
+
+### USB Configuration
+
+The USB CDC-ECM interface is automatically configured. The device will appear as:
+- `/dev/ttyACM0` (serial console)
+- Network interface (usb0 or similar)
+
+## Host Setup (Linux)
+
+### 1. Flash the Firmware
+
+Make sure to use the correct serial port. If you have multiple USB devices:
+
+```bash
+# List available ports
+ls /dev/ttyACM*
+
+# Flash to the correct port (usually /dev/ttyACM0 or /dev/ttyACM1)
+idf.py -p /dev/ttyACM1 flash  # Use the port where your ESP32-C3 is connected
 ```
 
-6. Test connectivity:
+**Note:** If flashing fails, put the ESP32-C3 into download mode:
+1. Hold BOOT button
+2. Press and release RESET button
+3. Release BOOT button
+4. Immediately run the flash command
+
+### 2. Install USB Network Driver
+
+The ESP32-C3 will appear as a CDC-ECM device. Linux should recognize it automatically, but you may need to load the driver:
+
+```bash
+sudo modprobe cdc_ether
+```
+
+### 3. Configure Network Interface
+
+Once connected, the interface should appear. Check with:
+```bash
+ip link show
+```
+
+You should see a device like `usb0` or `enp0s...`.
+
+### 3. Configure IP Address
+
+**Option A: DHCP (if ESP32 provides DHCP server)**
+```bash
+sudo dhclient usb0
+```
+
+**Option B: Static IP**
+```bash
+sudo ip addr add 192.168.7.2/24 dev usb0
+sudo ip link set usb0 up
+```
+
+The ESP32-C3 will have IP `192.168.7.1` by default.
+
+### 4. Test Connection
+
 ```bash
 ping 192.168.7.1  # Ping ESP32
-ping 8.8.8.8      # Test internet (if routing configured)
+ping 8.8.8.8      # Ping through WiFi (if ESP32 is connected to internet)
 ```
+
+## Usage
+
+1. Flash the firmware to your ESP32-C3
+2. Connect via USB to your laptop
+3. Configure the network interface as shown above
+4. The ESP32 will automatically connect to WiFi (if configured)
+5. All network traffic through the USB interface will be bridged to WiFi
 
 ## Architecture
 
 ```
-[Linux Apps] <--TAP--> [bridge_usb.py] <--USB Serial--> [ESP32-C3] <--WiFi--> [AP]
+[Linux Host] <--USB CDC-ECM--> [ESP32-C3] <--WiFi--> [Access Point]
+   usb0                              Station Mode
 ```
 
-- TAP interface: Virtual network interface on Linux
-- bridge_usb.py: Bridges Ethernet frames between TAP and USB serial
-- ESP32-C3: Bridges USB serial to WiFi
-
-## Example
-- sudo python3 setup_tap.py
-
-    ESP32 WiFi Adapter: Host Setup
-    Auto-detect: scanning /dev/ttyACM* for ESP32 (VID 303a)...
-    /dev/ttyACM0: VID=0483, PID=5740
-    /dev/ttyACM1: VID=303a, PID=1001
-    Auto-detect: selected /dev/ttyACM1 (Espressif VID 303a)
-    TUN/TAP module already loaded
-    Creating TAP interface: esp0
-    TAP interface created and configured
-    - USB device found: /dev/ttyACM1
-
-    Setup complete!
-```
-    TAP interface: esp0
-    IP address: 192.168.7.1
-    USB device: /dev/ttyACM1
-```
-
-- To remove the interface later, run:
-```
-  sudo ip tuntap del mode tap esp0
-```
+- **USB Side**: CDC-ECM presents Ethernet frames over USB
+- **WiFi Side**: ESP-IDF WiFi stack handles all 802.11 operations including 4-way handshake
+- **Bridge**: Application bridges Ethernet frames between USB and WiFi
 
 ## Troubleshooting
-### Permission denied
-- Make sure scripts are run with `sudo`
-- Check USB device permissions: `ls -l /dev/ttyACM*`
 
-### TAP interface not created
-- Check if TUN module is loaded: `lsmod | grep tun`
-- Load manually: `sudo modprobe tun`
+### Device not recognized
+- Check USB cable (data capable)
+- Verify USB drivers: `lsusb` should show Espressif device
+- Check dmesg: `dmesg | tail`
 
-### No data flow
-- Check ESP32 serial monitor for connection status
-- Verify WiFi credentials in `wifi_config.h`
-- Check USB connection: `dmesg | tail`
+### Network interface not appearing
+- Load driver: `sudo modprobe cdc_ether`
+- Check: `ip link show`
+- May need udev rules (see host_setup/)
+
+### WiFi connection issues
+- Check credentials in `wifi_config.h`
+- Monitor serial output: `idf.py monitor`
+- Verify AP is in range and 2.4GHz
+
+### No internet connectivity
+- Verify ESP32 connected to WiFi: check serial monitor
+- Check routing: `ip route`
+- Verify DNS: `cat /etc/resolv.conf`
+
+## License
+
+MIT License
+
